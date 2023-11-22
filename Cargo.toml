@@ -12,3 +12,5 @@ opt-level = 1
 [dependencies]
 bevy = "0.12.0"
 bevy_xpbd_2d = "0.3"
+evdev = { version = "0.12.1", features = ["tokio"]}
+futures-util = "0.3.29"
