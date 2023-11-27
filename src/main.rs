@@ -3,7 +3,6 @@ use std::pin::Pin;
 use bevy::{prelude::*, window::Cursor};
 use bevy_xpbd_2d::{math::*, prelude::*};
 use evdev::{Device, InputEvent, InputEventKind, RelativeAxisType};
-use futures_util::select;
 use futures_util::FutureExt;
 use futures_util::Stream;
 use futures_util::StreamExt;
@@ -102,21 +101,32 @@ fn setup(mut commands: Commands) {
 
 fn mice_input(mut _commands: Commands, mut mouse_stream: NonSendMut<MouseStream>) {
     loop {
-        let next_ev = select! {
-            val = mouse_stream.0.next().fuse() => {
-                match val {
-                    None => unreachable!("I thiiiiink?"),
-                    Some((right, Ok(ev))) => Some((right, ev)),
-                    _ => panic!("some io error idk"),
-                }
-            },
-            default => {
-                println!("uh");
-                None
-            },
+        // let next_ev = select! {
+        //     val = mouse_stream.0.next().fuse() => {
+        //         match val {
+        //             None => unreachable!("I thiiiiink?"),
+        //             Some((right, Ok(ev))) => Some((right, ev)),
+        //             _ => panic!("some io error idk"),
+        //         }
+        //     },
+        //     default => {
+        //         println!("uh");
+        //         None
+        //     },
+        // };
+        let _next_ev = match mouse_stream.0.next().now_or_never() {
+            Some(Some((_, Err(_)))) => panic!("io err"),
+            Some(Some((_, Ok(_)))) => println!("ev"),
+            Some(None) => {
+                unreachable!("what?")
+            }
+            None => {
+                println!("None");
+                break;
+            }
         };
-        let Some((right, ev)) = next_ev else { break };
-        dbg!(ev);
+        // let Some((right, ev)) = next_ev else { break };
+        // dbg!(ev);
         // match (ev.kind(), right) {
         //     (InputEventKind::RelAxis(RelativeAxisType::REL_X), false) => {}
         //     (InputEventKind::RelAxis(RelativeAxisType::REL_Y), false) => {}
