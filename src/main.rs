@@ -1,16 +1,16 @@
-use std::pin::Pin;
+use std::env;
+use std::sync::mpsc::TryRecvError;
+use std::thread;
 
 use bevy::{prelude::*, window::Cursor};
 use bevy_xpbd_2d::{math::*, prelude::*};
-use evdev::{Device, InputEvent, InputEventKind, RelativeAxisType};
-use futures_util::FutureExt;
-use futures_util::Stream;
-use futures_util::StreamExt;
+use evdev::Device;
+use run::mouse_thread::mouse_thread;
+use run::mouse_thread::MouseMove;
 
-struct MouseStream(Pin<Box<dyn Stream<Item = (bool, Result<InputEvent, std::io::Error>)>>>);
+struct MouseStream(std::sync::mpsc::Receiver<MouseMove>);
 
-#[tokio::main]
-async fn main() {
+fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
@@ -31,18 +31,20 @@ async fn main() {
         .insert_resource(SubstepCount(50))
         .insert_resource(Gravity(Vector::NEG_Y * 1000.0))
         .add_systems(Startup, setup)
-        .add_systems(Startup, setup_naive_mouse_stream)
+        .add_systems(Startup, setup_mouse_stream)
         .add_systems(Update, mice_input)
         .run();
 }
 
-fn setup_naive_mouse_stream(world: &mut World) {
-    let l_dev = Device::open("/dev/input/event9").unwrap();
-    let r_dev = Device::open("/dev/input/event16").unwrap();
-    let l_stream = l_dev.into_event_stream().unwrap().map(|ev| (false, ev));
-    let r_stream = r_dev.into_event_stream().unwrap().map(|ev| (true, ev));
-    let events = futures_util::stream::select(l_stream, r_stream);
-    world.insert_non_send_resource(MouseStream(Box::pin(events)));
+fn setup_mouse_stream(world: &mut World) {
+    let args: Vec<String> = env::args().collect();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let l_dev = Device::open(args[1].clone()).unwrap();
+    let r_dev = Device::open(args[2].clone()).unwrap();
+    thread::spawn(move || {
+        mouse_thread(tx, l_dev, r_dev).unwrap();
+    });
+    world.insert_non_send_resource(MouseStream(rx));
 }
 
 fn setup(mut commands: Commands) {
@@ -99,40 +101,20 @@ fn setup(mut commands: Commands) {
     );
 }
 
-fn mice_input(mut _commands: Commands, mut mouse_stream: NonSendMut<MouseStream>) {
+fn mice_input(mut _commands: Commands, mouse_stream: NonSend<MouseStream>) {
     loop {
-        // let next_ev = select! {
-        //     val = mouse_stream.0.next().fuse() => {
-        //         match val {
-        //             None => unreachable!("I thiiiiink?"),
-        //             Some((right, Ok(ev))) => Some((right, ev)),
-        //             _ => panic!("some io error idk"),
-        //         }
-        //     },
-        //     default => {
-        //         println!("uh");
-        //         None
-        //     },
-        // };
-        let _next_ev = match mouse_stream.0.next().now_or_never() {
-            Some(Some((_, Err(_)))) => panic!("io err"),
-            Some(Some((_, Ok(_)))) => println!("ev"),
-            Some(None) => {
-                unreachable!("what?")
+        match mouse_stream.0.try_recv() {
+            // Ok(m) => match m {
+            //     MouseMove::LeftX(d) => todo!(),
+            //     MouseMove::LeftY(d) => todo!(),
+            //     MouseMove::RightX(d) => todo!(),
+            //     MouseMove::RightY(d) => todo!(),
+            // },
+            Ok(m) => {
+                dbg!(m);
             }
-            None => {
-                println!("None");
-                break;
-            }
-        };
-        // let Some((right, ev)) = next_ev else { break };
-        // dbg!(ev);
-        // match (ev.kind(), right) {
-        //     (InputEventKind::RelAxis(RelativeAxisType::REL_X), false) => {}
-        //     (InputEventKind::RelAxis(RelativeAxisType::REL_Y), false) => {}
-        //     (InputEventKind::RelAxis(RelativeAxisType::REL_X), true) => {}
-        //     (InputEventKind::RelAxis(RelativeAxisType::REL_Y), true) => {}
-        //     _ => (),
-        // }
+            Err(TryRecvError::Empty) => break,
+            Err(TryRecvError::Disconnected) => panic!("damb"),
+        }
     }
 }

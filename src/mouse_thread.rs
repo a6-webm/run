@@ -3,6 +3,7 @@ use std::sync::mpsc::SendError;
 use evdev::{Device, EventType, InputEventKind, RelativeAxisType};
 use futures_util::StreamExt;
 
+#[derive(Debug)]
 pub enum MouseMove {
     LeftX(i32),
     LeftY(i32),
@@ -10,6 +11,7 @@ pub enum MouseMove {
     RightY(i32),
 }
 
+#[tokio::main]
 pub async fn mouse_thread(
     tx: std::sync::mpsc::Sender<MouseMove>,
     l_dev: Device,
