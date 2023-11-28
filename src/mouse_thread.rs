@@ -11,7 +11,7 @@ pub enum MouseMove {
     RightY(i32),
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 pub async fn mouse_thread(
     tx: std::sync::mpsc::Sender<MouseMove>,
     l_dev: Device,
