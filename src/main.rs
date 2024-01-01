@@ -6,29 +6,31 @@ use bevy::{prelude::*, window::Cursor};
 use bevy_xpbd_2d::{math::*, prelude::*};
 use evdev::Device;
 use run::mouse_thread::mouse_thread;
+use run::mouse_thread::AxType;
+use run::mouse_thread::Lr;
 use run::mouse_thread::MouseMove;
 
 struct MouseStream(std::sync::mpsc::Receiver<MouseMove>);
 
-struct Rect {
-    top: i16,
-    bottom: i16,
-    right: i16,
-    left: i16,
-}
-
-#[derive(Resource)]
 struct MouseSpace {
-    r: Rect,
-    l: Rect,
+    top: i32,
+    bottom: i32,
+    right: i32,
+    left: i32,
 }
 
 #[derive(Resource)]
-struct MousePos {
-    rx: i16,
-    ry: i16,
-    lx: i16,
-    ly: i16,
+struct MouseSpaces {
+    r: MouseSpace,
+    l: MouseSpace,
+}
+
+#[derive(Resource)]
+struct MicePos {
+    rx: i32,
+    ry: i32,
+    lx: i32,
+    ly: i32,
 }
 
 #[derive(Component)]
@@ -68,11 +70,25 @@ fn main() {
         .insert_resource(ClearColor(Color::rgb(0.05, 0.05, 0.1)))
         .insert_resource(SubstepCount(50))
         .insert_resource(Gravity(Vector::NEG_Y * 1000.0))
-        .insert_resource(MouseSpace {
-            rw: 100,
-            rh: 100,
-            lw: 100,
-            lh: 100,
+        .insert_resource(MicePos {
+            rx: 0,
+            ry: 0,
+            lx: 0,
+            ly: 0,
+        })
+        .insert_resource(MouseSpaces {
+            l: MouseSpace {
+                top: 0,
+                bottom: 100,
+                right: 100,
+                left: 0,
+            },
+            r: MouseSpace {
+                top: 0,
+                bottom: 100,
+                right: 100,
+                left: 0,
+            },
         })
         .add_systems(Startup, setup)
         .add_systems(Startup, setup_mouse_stream)
@@ -176,21 +192,23 @@ fn setup(mut commands: Commands) {
 fn mice_input(
     mut _commands: Commands,
     mouse_stream: NonSend<MouseStream>,
-    mut mouse_pos: ResMut<MousePos>,
-    mouse_space: Res<MouseSpace>,
-    mut q_body: Query<(&Transform, &mut ExternalTorque), With<Body>>,
-    mut q_near_thigh: Query<(&Transform, &mut ExternalTorque), With<NearThigh>>,
-    mut q_near_shin: Query<(&Transform, &mut ExternalTorque), With<NearShin>>,
+    mut mice_pos: ResMut<MicePos>,
+    mouse_spaces: Res<MouseSpaces>,
+    mut q_body: Query<
+        (&Transform, &mut ExternalTorque),
+        (With<Body>, Without<NearThigh>, Without<NearShin>),
+    >,
+    mut q_near_thigh: Query<
+        (&Transform, &mut ExternalTorque),
+        (Without<Body>, With<NearThigh>, Without<NearShin>),
+    >,
+    mut q_near_shin: Query<
+        (&Transform, &mut ExternalTorque),
+        (Without<Body>, Without<NearThigh>, With<NearShin>),
+    >,
 ) {
     loop {
         match mouse_stream.0.try_recv() {
-            // TODO
-            // Ok(m) => match m {
-            //     MouseMove::LeftX(d) => todo!(),
-            //     MouseMove::LeftY(d) => todo!(),
-            //     MouseMove::RightX(d) => todo!(),
-            //     MouseMove::RightY(d) => todo!(),
-            // },
             Ok(m) => {
                 dbg!(m);
             }
@@ -198,4 +216,12 @@ fn mice_input(
             Err(TryRecvError::Disconnected) => panic!("damb"),
         }
     }
+}
+
+fn resolve_rel_move(m_move: &MouseMove, mice_pos: &mut MicePos, spaces: &MouseSpaces) {
+    debug_assert!(m_move.ax_type == AxType::Rel);
+    let space = match m_move.lr {
+        Lr::Left => &spaces.l,
+        Lr::Right => &spaces.r,
+    };
 }
