@@ -9,12 +9,6 @@ pub enum Lr {
     Right,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum AxType {
-    Rel,
-    Abs,
-}
-
 #[derive(Debug)]
 pub enum Ax {
     X,
@@ -22,11 +16,19 @@ pub enum Ax {
 }
 
 #[derive(Debug)]
-pub struct MouseMove {
+pub struct MouseMoveData {
     pub lr: Lr,
-    pub ax_type: AxType,
     pub ax: Ax,
     pub v: i32,
+}
+
+pub type RelMouseMove = MouseMoveData;
+pub type AbsMouseMove = MouseMoveData;
+
+#[derive(Debug)]
+pub enum MouseMove {
+    Rel(RelMouseMove),
+    Abs(AbsMouseMove),
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -39,39 +41,28 @@ pub async fn mouse_thread(
     let r_stream = r_dev.into_event_stream().unwrap().map(|ev| (true, ev));
     let mut events = futures_util::stream::select(l_stream, r_stream);
     while let Some((right, Ok(ev))) = events.next().await {
-        let lr = if right { Lr::Right } else { Lr::Left };
-        let mouse_move = match ev.kind() {
-            InputEventKind::RelAxis(ax_type) => match ax_type {
-                RelativeAxisType::REL_X => MouseMove {
-                    lr,
-                    ax_type: AxType::Rel,
-                    ax: Ax::X,
-                    v: ev.value(),
-                },
-                RelativeAxisType::REL_Y => MouseMove {
-                    lr,
-                    ax_type: AxType::Rel,
-                    ax: Ax::Y,
-                    v: ev.value(),
-                },
+        let mouse_move = {
+            let lr = if right { Lr::Right } else { Lr::Left };
+            let v = ev.value();
+            match ev.kind() {
+                InputEventKind::RelAxis(ax_) => {
+                    let ax = match ax_ {
+                        RelativeAxisType::REL_X => Ax::X,
+                        RelativeAxisType::REL_Y => Ax::Y,
+                        _ => continue,
+                    };
+                    MouseMove::Rel(MouseMoveData { lr, ax, v })
+                }
+                InputEventKind::AbsAxis(ax_) => {
+                    let ax = match ax_ {
+                        AbsoluteAxisType::ABS_X => Ax::X,
+                        AbsoluteAxisType::ABS_Y => Ax::Y,
+                        _ => continue,
+                    };
+                    MouseMove::Rel(MouseMoveData { lr, ax, v })
+                }
                 _ => continue,
-            },
-            InputEventKind::AbsAxis(ax_type) => match ax_type {
-                AbsoluteAxisType::ABS_X => MouseMove {
-                    lr,
-                    ax_type: AxType::Abs,
-                    ax: Ax::X,
-                    v: ev.value(),
-                },
-                AbsoluteAxisType::ABS_Y => MouseMove {
-                    lr,
-                    ax_type: AxType::Abs,
-                    ax: Ax::Y,
-                    v: ev.value(),
-                },
-                _ => continue,
-            },
-            _ => continue,
+            }
         };
         tx.send(mouse_move)?;
     }

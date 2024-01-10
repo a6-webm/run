@@ -6,9 +6,9 @@ use bevy::{prelude::*, window::Cursor};
 use bevy_xpbd_2d::{math::*, prelude::*};
 use evdev::Device;
 use run::mouse_thread::mouse_thread;
-use run::mouse_thread::AxType;
 use run::mouse_thread::Lr;
 use run::mouse_thread::MouseMove;
+use run::mouse_thread::RelMouseMove;
 
 struct MouseStream(std::sync::mpsc::Receiver<MouseMove>);
 
@@ -219,8 +219,7 @@ fn mice_input(
     }
 }
 
-fn resolve_rel_move(m_move: &MouseMove, mice_pos: &mut MicePos, spaces: &MouseSpaces) {
-    debug_assert!(m_move.ax_type == AxType::Rel);
+fn resolve_rel_move(m_move: &RelMouseMove, mice_pos: &mut MicePos, spaces: &MouseSpaces) {
     let space = match m_move.lr {
         Lr::Left => &spaces.l,
         Lr::Right => &spaces.r,
