@@ -1,16 +1,19 @@
 use std::env;
-use std::sync::mpsc::TryRecvError;
-use std::thread;
+use std::os::fd::AsRawFd;
+use std::os::fd::FromRawFd;
+use std::os::unix::net::UnixStream;
 
 use bevy::{prelude::*, window::Cursor};
 use bevy_xpbd_2d::{math::*, prelude::*};
 use evdev::Device;
-use run::mouse_thread::mouse_thread;
-use run::mouse_thread::AxType;
-use run::mouse_thread::Lr;
-use run::mouse_thread::MouseMove;
+use libc::F_SETFL;
+use libc::O_NONBLOCK;
 
-struct MouseStream(std::sync::mpsc::Receiver<MouseMove>);
+#[derive(Resource)]
+struct Mice {
+    r: Device,
+    l: Device,
+}
 
 struct MouseSpace {
     top: i32,
@@ -52,7 +55,12 @@ enum Layer {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let mouse_stream = create_mouse_stream(&args);
+    let mut mice = Mice {
+        l: Device::open(args[1].clone()).unwrap(),
+        r: Device::open(args[2].clone()).unwrap(),
+    };
+    assert!(unsafe { libc::fcntl(mice.l.as_raw_fd(), F_SETFL, O_NONBLOCK) } == 0);
+    assert!(unsafe { libc::fcntl(mice.l.as_raw_fd(), F_SETFL, O_NONBLOCK) } == 0);
     App::new()
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
@@ -69,7 +77,7 @@ fn main() {
             }),
             PhysicsPlugins::default(),
         ))
-        .insert_non_send_resource(mouse_stream)
+        .insert_resource(mice)
         .insert_resource(ClearColor(Color::rgb(0.05, 0.05, 0.1)))
         .insert_resource(SubstepCount(50))
         .insert_resource(Gravity(Vector::NEG_Y * 1000.0))
@@ -96,16 +104,6 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(Update, mice_input)
         .run();
-}
-
-fn create_mouse_stream(args: &Vec<String>) -> MouseStream {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let l_dev = Device::open(args[1].clone()).unwrap();
-    let r_dev = Device::open(args[2].clone()).unwrap();
-    thread::spawn(move || {
-        mouse_thread(tx, l_dev, r_dev).unwrap();
-    });
-    MouseStream(rx)
 }
 
 fn setup(mut commands: Commands) {
@@ -192,7 +190,7 @@ fn setup(mut commands: Commands) {
 
 fn mice_input(
     mut _commands: Commands,
-    mouse_stream: NonSend<MouseStream>,
+    mut mice: ResMut<Mice>,
     mut mice_pos: ResMut<MicePos>,
     mouse_spaces: Res<MouseSpaces>,
     mut q_body: Query<
@@ -208,21 +206,14 @@ fn mice_input(
         (Without<Body>, Without<NearThigh>, With<NearShin>),
     >,
 ) {
-    loop {
-        match mouse_stream.0.try_recv() {
-            Ok(m) => {
-                dbg!(m);
-            }
-            Err(TryRecvError::Empty) => break,
-            Err(TryRecvError::Disconnected) => panic!("damb"),
+    if let Ok(evs) = mice.l.fetch_events() {
+        for ev in evs {
+            dbg!(ev);
         }
     }
-}
-
-fn resolve_rel_move(m_move: &MouseMove, mice_pos: &mut MicePos, spaces: &MouseSpaces) {
-    debug_assert!(m_move.ax_type == AxType::Rel);
-    let space = match m_move.lr {
-        Lr::Left => &spaces.l,
-        Lr::Right => &spaces.r,
-    };
+    if let Ok(evs) = mice.l.fetch_events() {
+        for ev in evs {
+            dbg!(ev);
+        }
+    }
 }
