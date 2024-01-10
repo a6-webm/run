@@ -51,6 +51,8 @@ enum Layer {
 }
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    let mouse_stream = create_mouse_stream(&args);
     App::new()
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
@@ -67,6 +69,7 @@ fn main() {
             }),
             PhysicsPlugins::default(),
         ))
+        .insert_non_send_resource(mouse_stream)
         .insert_resource(ClearColor(Color::rgb(0.05, 0.05, 0.1)))
         .insert_resource(SubstepCount(50))
         .insert_resource(Gravity(Vector::NEG_Y * 1000.0))
@@ -91,20 +94,18 @@ fn main() {
             },
         })
         .add_systems(Startup, setup)
-        .add_systems(Startup, setup_mouse_stream)
         .add_systems(Update, mice_input)
         .run();
 }
 
-fn setup_mouse_stream(world: &mut World) {
-    let args: Vec<String> = env::args().collect();
+fn create_mouse_stream(args: &Vec<String>) -> MouseStream {
     let (tx, rx) = std::sync::mpsc::channel();
     let l_dev = Device::open(args[1].clone()).unwrap();
     let r_dev = Device::open(args[2].clone()).unwrap();
     thread::spawn(move || {
         mouse_thread(tx, l_dev, r_dev).unwrap();
     });
-    world.insert_non_send_resource(MouseStream(rx));
+    MouseStream(rx)
 }
 
 fn setup(mut commands: Commands) {
