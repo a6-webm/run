@@ -1,6 +1,11 @@
+use bevy::utils::dbg;
 use bevy::{prelude::*, window::Cursor};
 use bevy_xpbd_2d::{math::*, prelude::*};
+use evdev::AbsoluteAxisType;
 use evdev::Device;
+use evdev::InputEvent;
+use evdev::InputEventKind;
+use evdev::RelativeAxisType;
 use libc::F_SETFL;
 use libc::O_NONBLOCK;
 use std::env;
@@ -52,12 +57,12 @@ enum Layer {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let mut mice = Mice {
+    let mice = Mice {
         l: Device::open(args[1].clone()).unwrap(),
         r: Device::open(args[2].clone()).unwrap(),
     };
     assert!(unsafe { libc::fcntl(mice.l.as_raw_fd(), F_SETFL, O_NONBLOCK) } == 0);
-    assert!(unsafe { libc::fcntl(mice.l.as_raw_fd(), F_SETFL, O_NONBLOCK) } == 0);
+    assert!(unsafe { libc::fcntl(mice.r.as_raw_fd(), F_SETFL, O_NONBLOCK) } == 0);
     App::new()
         .add_plugins((
             DefaultPlugins.set(WindowPlugin {
@@ -185,6 +190,34 @@ fn setup(mut commands: Commands) {
     );
 }
 
+#[derive(Debug)]
+pub enum Lr {
+    Left,
+    Right,
+}
+
+#[derive(Debug)]
+pub enum Ax {
+    X,
+    Y,
+}
+
+#[derive(Debug)]
+pub struct MouseMoveData {
+    pub lr: Lr,
+    pub ax: Ax,
+    pub v: i32,
+}
+
+pub type RelMouseMove = MouseMoveData;
+pub type AbsMouseMove = MouseMoveData;
+
+#[derive(Debug)]
+pub enum MouseMove {
+    Rel(RelMouseMove),
+    Abs(AbsMouseMove),
+}
+
 fn mice_input(
     mut _commands: Commands,
     mut mice: ResMut<Mice>,
@@ -203,15 +236,46 @@ fn mice_input(
         (Without<Body>, Without<NearThigh>, With<NearShin>),
     >,
 ) {
+    let mut moves = Vec::new();
     if let Ok(evs) = mice.l.fetch_events() {
         for ev in evs {
-            dbg!(ev);
+            if let Some(m_move) = event_to_mouse_move(ev, false) {
+                moves.push(m_move);
+            }
         }
     }
-    if let Ok(evs) = mice.l.fetch_events() {
+    if let Ok(evs) = mice.r.fetch_events() {
+        dbg!("uh");
         for ev in evs {
-            dbg!(ev);
+            if let Some(m_move) = event_to_mouse_move(ev, false) {
+                moves.push(m_move);
+            }
         }
+    }
+    dbg!(moves);
+}
+
+fn event_to_mouse_move(ev: InputEvent, right: bool) -> Option<MouseMove> {
+    let lr = if right { Lr::Right } else { Lr::Left };
+    let v = ev.value();
+    match ev.kind() {
+        InputEventKind::RelAxis(ax_) => {
+            let ax = match ax_ {
+                RelativeAxisType::REL_X => Ax::X,
+                RelativeAxisType::REL_Y => Ax::Y,
+                _ => return None,
+            };
+            Some(MouseMove::Rel(MouseMoveData { lr, ax, v }))
+        }
+        InputEventKind::AbsAxis(ax_) => {
+            let ax = match ax_ {
+                AbsoluteAxisType::ABS_X => Ax::X,
+                AbsoluteAxisType::ABS_Y => Ax::Y,
+                _ => return None,
+            };
+            Some(MouseMove::Rel(MouseMoveData { lr, ax, v }))
+        }
+        _ => None,
     }
 }
 
