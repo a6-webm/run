@@ -1,4 +1,3 @@
-use bevy::utils::dbg;
 use bevy::{prelude::*, window::Cursor};
 use bevy_xpbd_2d::{math::*, prelude::*};
 use evdev::AbsoluteAxisType;
@@ -13,8 +12,8 @@ use std::os::fd::AsRawFd;
 
 #[derive(Resource)]
 struct Mice {
-    r: Device,
     l: Device,
+    r: Device,
 }
 
 struct MouseSpace {
@@ -26,16 +25,20 @@ struct MouseSpace {
 
 #[derive(Resource)]
 struct MouseSpaces {
-    r: MouseSpace,
     l: MouseSpace,
+    r: MouseSpace,
 }
 
-#[derive(Resource)]
+#[derive(Debug)]
+struct MousePos {
+    x: i32,
+    y: i32,
+}
+
+#[derive(Resource, Debug)]
 struct MicePos {
-    rx: i32,
-    ry: i32,
-    lx: i32,
-    ly: i32,
+    l: MousePos,
+    r: MousePos,
 }
 
 #[derive(Component)]
@@ -84,23 +87,21 @@ fn main() {
         .insert_resource(SubstepCount(50))
         .insert_resource(Gravity(Vector::NEG_Y * 1000.0))
         .insert_resource(MicePos {
-            rx: 0,
-            ry: 0,
-            lx: 0,
-            ly: 0,
+            l: MousePos { x: 0, y: 0 },
+            r: MousePos { x: 0, y: 0 },
         })
         .insert_resource(MouseSpaces {
             l: MouseSpace {
-                top: 0,
-                bottom: 100,
-                right: 100,
-                left: 0,
+                top: 100,
+                bottom: 500,
+                right: 500,
+                left: 100,
             },
             r: MouseSpace {
-                top: 0,
-                bottom: 100,
-                right: 100,
-                left: 0,
+                top: 100,
+                bottom: 500,
+                right: 500,
+                left: 100,
             },
         })
         .add_systems(Startup, setup)
@@ -245,14 +246,19 @@ fn mice_input(
         }
     }
     if let Ok(evs) = mice.r.fetch_events() {
-        dbg!("uh");
         for ev in evs {
-            if let Some(m_move) = event_to_mouse_move(ev, false) {
+            if let Some(m_move) = event_to_mouse_move(ev, true) {
                 moves.push(m_move);
             }
         }
     }
-    dbg!(moves);
+    for m_move in moves {
+        match m_move {
+            MouseMove::Rel(m_m) => resolve_rel_m_move(&m_m, &mut mice_pos, &mouse_spaces),
+            MouseMove::Abs(m_m) => resolve_abs_m_move(&m_m, &mut mice_pos, &mouse_spaces),
+        }
+    }
+    dbg!(mice_pos);
 }
 
 fn event_to_mouse_move(ev: InputEvent, right: bool) -> Option<MouseMove> {
@@ -273,15 +279,36 @@ fn event_to_mouse_move(ev: InputEvent, right: bool) -> Option<MouseMove> {
                 AbsoluteAxisType::ABS_Y => Ax::Y,
                 _ => return None,
             };
-            Some(MouseMove::Rel(MouseMoveData { lr, ax, v }))
+            Some(MouseMove::Abs(MouseMoveData { lr, ax, v }))
         }
         _ => None,
     }
 }
 
-fn resolve_rel_move(m_move: &RelMouseMove, mice_pos: &mut MicePos, spaces: &MouseSpaces) {
-    let space = match m_move.lr {
-        Lr::Left => &spaces.l,
-        Lr::Right => &spaces.r,
+fn resolve_rel_m_move(m_move: &RelMouseMove, mice_pos: &mut MicePos, spaces: &MouseSpaces) {
+    let (space, mouse_pos) = match m_move.lr {
+        Lr::Left => (&spaces.l, &mut mice_pos.l),
+        Lr::Right => (&spaces.r, &mut mice_pos.r),
     };
+    let (value_to_change, min_bound, max_bound) = match m_move.ax {
+        Ax::X => (&mut mouse_pos.x, space.left, space.right),
+        Ax::Y => (&mut mouse_pos.y, space.top, space.bottom),
+    };
+
+    *value_to_change = (*value_to_change + m_move.v)
+        .max(min_bound)
+        .min(max_bound - 1);
+}
+
+fn resolve_abs_m_move(m_move: &AbsMouseMove, mice_pos: &mut MicePos, spaces: &MouseSpaces) {
+    let (space, mouse_pos) = match m_move.lr {
+        Lr::Left => (&spaces.l, &mut mice_pos.l),
+        Lr::Right => (&spaces.r, &mut mice_pos.r),
+    };
+    let (value_to_change, min_bound, max_bound) = match m_move.ax {
+        Ax::X => (&mut mouse_pos.x, space.left, space.right),
+        Ax::Y => (&mut mouse_pos.y, space.top, space.bottom),
+    };
+
+    *value_to_change = m_move.v.max(min_bound).min(max_bound - 1);
 }
