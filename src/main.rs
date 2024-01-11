@@ -1,5 +1,6 @@
 use bevy::{prelude::*, window::Cursor};
-use bevy_xpbd_2d::{math::*, prelude::*};
+use bevy_rapier2d::geometry::Group;
+use bevy_rapier2d::prelude::*;
 use evdev::AbsoluteAxisType;
 use evdev::Device;
 use evdev::InputEvent;
@@ -8,6 +9,7 @@ use evdev::RelativeAxisType;
 use libc::F_SETFL;
 use libc::O_NONBLOCK;
 use std::env;
+use std::f32::consts::PI;
 use std::os::fd::AsRawFd;
 
 #[derive(Resource)]
@@ -52,12 +54,6 @@ struct NearThigh;
 #[derive(Component)]
 struct NearShin;
 
-#[derive(PhysicsLayer)]
-enum Layer {
-    PlayerNear,
-    PlayerFar,
-}
-
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mice = Mice {
@@ -80,12 +76,11 @@ fn main() {
                 }),
                 ..Default::default()
             }),
-            PhysicsPlugins::default(),
+            RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(1000.0),
+            RapierDebugRenderPlugin::default(),
         ))
         .insert_resource(mice)
         .insert_resource(ClearColor(Color::rgb(0.05, 0.05, 0.1)))
-        .insert_resource(SubstepCount(50))
-        .insert_resource(Gravity(Vector::NEG_Y * 1000.0))
         .insert_resource(MicePos {
             l: MousePos { x: 0, y: 0 },
             r: MousePos { x: 0, y: 0 },
@@ -128,8 +123,8 @@ fn setup(mut commands: Commands) {
             }),
             ..default()
         },
-        RigidBody::Kinematic,
-        Collider::cuboid(50.0, 50.0),
+        RigidBody::Fixed,
+        Collider::cuboid(25.0, 25.0),
     ));
 
     let body = commands
@@ -137,16 +132,28 @@ fn setup(mut commands: Commands) {
             Body,
             SpriteBundle {
                 sprite: square_sprite.clone(),
-                transform: Transform::from_xyz(0.0, 100.0, 0.0),
+                transform: Transform::from_xyz(0.0, 100.0, 0.0).with_scale(Vec3 {
+                    x: 1.3,
+                    y: 1.0,
+                    z: 1.0,
+                }),
                 ..default()
             },
-            RigidBody::Dynamic,
-            Collider::cuboid(50.0, 50.0),
-            ExternalTorque::new(0.0).with_persistence(false),
+            RigidBody::Fixed,
+            Collider::cuboid(25.0, 25.0),
+            CollisionGroups::new(
+                Group::from_bits(0b01).unwrap(),
+                Group::from_bits(0b10).unwrap(),
+            ),
         ))
         .id();
 
-    let close_thigh = commands
+    let b_nt_joint = RevoluteJointBuilder::new()
+        .local_anchor1(Vec2::new(0.0, -50.0))
+        .local_anchor2(Vec2::new(0.0, 50.0))
+        .limits([0.0, PI - 0.1]);
+
+    let near_thigh = commands
         .spawn((
             NearThigh,
             SpriteBundle {
@@ -155,13 +162,21 @@ fn setup(mut commands: Commands) {
                 ..default()
             },
             RigidBody::Dynamic,
-            Collider::cuboid(50.0, 50.0),
-            CollisionLayers::new([Layer::PlayerNear], [Layer::PlayerNear]),
-            ExternalTorque::new(0.0).with_persistence(false),
+            Collider::cuboid(25.0, 25.0),
+            CollisionGroups::new(
+                Group::from_bits(0b01).unwrap(),
+                Group::from_bits(0b10).unwrap(),
+            ),
+            ImpulseJoint::new(body, b_nt_joint),
         ))
         .id();
 
-    let close_shin = commands
+    let nt_ns_joint = RevoluteJointBuilder::new()
+        .local_anchor1(Vec2::new(0.0, -50.0))
+        .local_anchor2(Vec2::new(0.0, 50.0))
+        .limits([-180f32.to_radians(), 0.0]);
+
+    let near_shin = commands
         .spawn((
             NearShin,
             SpriteBundle {
@@ -170,25 +185,14 @@ fn setup(mut commands: Commands) {
                 ..default()
             },
             RigidBody::Dynamic,
-            Collider::cuboid(50.0, 50.0),
-            CollisionLayers::new([Layer::PlayerNear], [Layer::PlayerNear]),
-            ExternalTorque::new(0.0).with_persistence(false),
+            Collider::cuboid(25.0, 25.0),
+            CollisionGroups::new(
+                Group::from_bits(0b01).unwrap(),
+                Group::from_bits(0b10).unwrap(),
+            ),
+            ImpulseJoint::new(near_thigh, nt_ns_joint),
         ))
         .id();
-
-    commands.spawn(
-        RevoluteJoint::new(body, close_thigh)
-            .with_local_anchor_1(Vector::new(0.0, -50.0))
-            .with_local_anchor_2(Vector::new(0.0, 50.0))
-            .with_angle_limits(-1.0, 1.0),
-    );
-
-    commands.spawn(
-        RevoluteJoint::new(close_thigh, close_shin)
-            .with_local_anchor_1(Vector::new(0.0, -50.0))
-            .with_local_anchor_2(Vector::new(0.0, 50.0))
-            .with_angle_limits(-1.0, 1.0),
-    );
 }
 
 #[derive(Debug)]
@@ -224,16 +228,13 @@ fn mice_input(
     mut mice: ResMut<Mice>,
     mut mice_pos: ResMut<MicePos>,
     mouse_spaces: Res<MouseSpaces>,
-    mut q_body: Query<
-        (&Transform, &mut ExternalTorque),
-        (With<Body>, Without<NearThigh>, Without<NearShin>),
-    >,
+    mut q_body: Query<&Transform, (With<Body>, Without<NearThigh>, Without<NearShin>)>,
     mut q_near_thigh: Query<
-        (&Transform, &mut ExternalTorque),
+        (&Transform, &mut ImpulseJoint),
         (Without<Body>, With<NearThigh>, Without<NearShin>),
     >,
     mut q_near_shin: Query<
-        (&Transform, &mut ExternalTorque),
+        (&Transform, &mut ImpulseJoint),
         (Without<Body>, Without<NearThigh>, With<NearShin>),
     >,
 ) {
@@ -258,7 +259,12 @@ fn mice_input(
             MouseMove::Abs(m_m) => resolve_abs_m_move(&m_m, &mut mice_pos, &mouse_spaces),
         }
     }
-    dbg!(mice_pos);
+    let normal_target = (mice_pos.l.x - mouse_spaces.l.left) as f32
+        / (mouse_spaces.l.right - mouse_spaces.l.left) as f32;
+    let target_vel = dbg!((normal_target - 0.5) * 2.0 * 100.0);
+    let mut imp_joint = q_near_thigh.get_single_mut().unwrap().1;
+    let joint = imp_joint.data.as_revolute_mut().unwrap();
+    joint.set_motor_velocity(target_vel, 1.0);
 }
 
 fn event_to_mouse_move(ev: InputEvent, right: bool) -> Option<MouseMove> {
